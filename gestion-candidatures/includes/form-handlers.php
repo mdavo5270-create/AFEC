@@ -1,5 +1,5 @@
 <?php
-/** Handlers suivi / upload / submit — sécurité renforcée */
+/** Handlers suivi / upload / download — sécurité renforcée */
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 function gc_render_suivi_box() {
@@ -121,16 +121,4 @@ function gc_form_redirect( array $args ) {
 	exit;
 }
 
-function gc_handle_submit() {
-	if ( ! isset( $_POST['gc_nonce'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['gc_nonce'] ) ), 'gc_submit' ) ) {
-		gc_form_redirect( array( 'gc_err' => 'nonce' ) );
-	}
-	if ( ! empty( $_POST['gc_website'] ) ) { gc_form_redirect( array( 'gc_ok' => 'GC-0000-0000' ) ); }
-	if ( gc_is_closed() ) { gc_form_redirect( array( 'gc_err' => 'closed' ) ); }
-	$ip = gc_client_ip();
-	if ( gc_rate_limited( 'submit', 5, HOUR_IN_SECONDS ) ) { gc_form_redirect( array( 'gc_err' => 'rate' ) ); }
-	// Note: le reste du traitement (champs, clip, anti-doublons atomiques, insert) reste dans le déploiement local complet.
-	// Voir AFEC_push/gestion-candidatures/includes/form-handlers.php pour la version complète.
-	error_log( 'gc_handle_submit: partial deploy - use full form-handlers from local AFEC_push' );
-	gc_form_redirect( array( 'gc_err' => 'server' ) );
-}
+require_once __DIR__ . '/form-submit.php';
