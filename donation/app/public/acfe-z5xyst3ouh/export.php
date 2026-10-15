@@ -1,64 +1,72 @@
 <?php
 /**
- * Export CSV Sécurisé — ACFE Admin
+ * Export CSV des candidatures — sécurisé contre l'injection de formules
+ * et journalisé.
  */
-
-require_once __DIR__ . '/includes/db.php';
 require_once __DIR__ . '/includes/security.php';
+require_once __DIR__ . '/includes/db.php';
 require_once __DIR__ . '/includes/csrf.php';
+require_once __DIR__ . '/includes/audit.php';
 
 check_admin_auth();
 require_csrf();
 
+$status = isset($_POST['status']) ? trim((string)$_POST['status']) : '';
+$allowed_statuses = ['', 'recue', 'en_verification', 'en_analyse', 'liste_courte', 'retenue', 'contactee', 'injoignable', 'confirmee', 'payee', 'refusee'];
+if (!in_array($status, $allowed_statuses, true)) {
+    $status = '';
+}
+
 $pdo = get_admin_pdo();
-$stmt = $pdo->query("SELECT id, dossier_num, firstname, lastname, email, phone, country, city, situation_pro, foyer, urgency, status, has_missing_doc, created_at FROM gc_candidatures ORDER BY id DESC");
+
+$sql = "SELECT id, dossier_num, firstname, lastname, email, phone, city, country, status, created_at
+        FROM gc_candidatures";
+$params = [];
+if ($status !== '') {
+    $sql .= " WHERE status = ?";
+    $params[] = $status;
+}
+$sql .= " ORDER BY created_at DESC LIMIT 10000";
+
+$stmt = $pdo->prepare($sql);
+$stmt->execute($params);
 $rows = $stmt->fetchAll();
 
-$filename = 'candidatures_acfe_' . date('Y-m-d_His') . '.csv';
+function csv_safe(string $value): string {
+    $value = str_replace(["\r", "\n", "\t"], ' ', $value);
+    if ($value !== '' && preg_match('/^[=+\-@\t\r]/', $value)) {
+        return "'" . $value;
+    }
+    return $value;
+}
+
+gc_audit('export_csv', [
+    'status_filter' => $status ?: 'all',
+    'row_count'     => count($rows),
+]);
 
 header('Content-Type: text/csv; charset=UTF-8');
-header('Content-Disposition: attachment; filename="' . $filename . '"');
+header('Content-Disposition: attachment; filename="candidatures_' . date('Y-m-d_His') . '.csv"');
 header('Cache-Control: private, no-store, no-cache, must-revalidate');
+header('Pragma: no-cache');
 
-$output = fopen('php://output', 'w');
-// BOM UTF-8 pour ouverture correcte dans Microsoft Excel
-fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
-
-fputcsv($output, [
-    'ID',
-    'Numéro Dossier',
-    'Prénom',
-    'Nom',
-    'E-mail',
-    'Téléphone',
-    'Pays',
-    'Ville',
-    'Situation Pro',
-    'Foyer',
-    'Degré Urgence',
-    'Statut',
-    'Doc Manquant',
-    'Date Dépôt'
-], ';');
+$out = fopen('php://output', 'w');
+fwrite($out, "\xEF\xBB\xBF");
+fputcsv($out, ['ID', 'N° Dossier', 'Prénom', 'Nom', 'Email', 'Téléphone', 'Ville', 'Pays', 'Statut', 'Date création'], ';');
 
 foreach ($rows as $r) {
-    fputcsv($output, [
+    fputcsv($out, [
         $r['id'],
-        $r['dossier_num'],
-        $r['firstname'],
-        $r['lastname'],
-        $r['email'],
-        $r['phone'],
-        $r['country'],
-        $r['city'],
-        $r['situation_pro'],
-        $r['foyer'],
-        $r['urgency'],
-        $r['status'],
-        $r['has_missing_doc'] ? 'Oui' : 'Non',
+        csv_safe((string)$r['dossier_num']),
+        csv_safe((string)$r['firstname']),
+        csv_safe((string)$r['lastname']),
+        csv_safe((string)$r['email']),
+        csv_safe((string)$r['phone']),
+        csv_safe((string)$r['city']),
+        csv_safe((string)$r['country']),
+        csv_safe((string)$r['status']),
         $r['created_at'],
     ], ';');
 }
-
-fclose($output);
+fclose($out);
 exit;
