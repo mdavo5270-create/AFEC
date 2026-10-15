@@ -1,8 +1,7 @@
 <?php
 /**
  * Protection CSRF — Espace Administration ACFE
- * 
- * Génération cryptographique et validation de jetons à usage unique ou de session.
+ * Jetons de session uniquement via POST (plus jamais via GET).
  */
 
 function csrf_token(): string {
@@ -17,8 +16,8 @@ function csrf_field(): string {
 }
 
 function verify_csrf(): bool {
-    $token = $_POST['csrf_token'] ?? $_GET['csrf_token'] ?? '';
-    if (empty($token) || empty($_SESSION['csrf_token'])) {
+    $token = $_POST['csrf_token'] ?? '';
+    if ($token === '' || empty($_SESSION['csrf_token'])) {
         return false;
     }
     return hash_equals($_SESSION['csrf_token'], $token);
@@ -27,6 +26,6 @@ function verify_csrf(): bool {
 function require_csrf(): void {
     if (!verify_csrf()) {
         http_response_code(403);
-        die("Erreur de sécurité : Jeton de validation CSRF invalide ou expiré. Veuillez recharger la page.");
+        die('Erreur de sécurité : jeton de validation CSRF invalide ou expiré. Veuillez recharger la page.');
     }
 }
