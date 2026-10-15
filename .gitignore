@@ -1,0 +1,36 @@
+# Logs locaux Local by Flywheel
+donation/logs/*
+!donation/logs/.gitkeep
+*.log
+
+# --- Secrets & données locales (NE JAMAIS COMMITTER) ---
+donation/app/public/wp-config.php
+donation/app/secure_config/app_config.php
+donation/app/sql/*
+!donation/app/sql/.gitkeep
+
+donation/app/.envrc
+donation/app/.env
+**/.env
+**/.env.*
+!**/.env.example
+
+# Uploads privés (conserver le dossier sans exposer les fichiers de test réels)
+donation/app/secure_storage/uploads/*
+!donation/app/secure_storage/uploads/.gitkeep
+donation/app/secure_storage/logs/*
+!donation/app/secure_storage/logs/.gitkeep
+
+# Jonction Windows redondante dans wp-content/plugins (source à la racine)
+donation/app/public/wp-content/plugins/gestion-candidatures
+
+# Système & OS
+Thumbs.db
+.DS_Store
+Desktop.ini
+*.tmp
+
+# Fichiers vidéo lourds (servis directement depuis le serveur local)
+*.mp4
+*.mov
+*.avi

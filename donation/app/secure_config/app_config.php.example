@@ -1,0 +1,47 @@
+<?php
+/**
+ * Configuration Sécurisée Globale — ACFE (exemple)
+ *
+ * Copiez ce fichier vers app_config.php et renseignez des secrets UNIQUES.
+ * Ne jamais committer app_config.php.
+ *
+ * CE FICHIER DOIT RESTER EN DEHORS DE LA RACINE WEB (DOCUMENT ROOT).
+ */
+
+// 1. Paramètres Base de Données
+define('GC_DB_HOST', '127.0.0.1');
+define('GC_DB_PORT', 3306);
+define('GC_DB_NAME', 'local');
+define('GC_DB_CHARSET', 'utf8mb4');
+
+// Utilisateur MySQL Public (droits limités)
+define('GC_DB_PUBLIC_USER', 'acfe_public');
+define('GC_DB_PUBLIC_PASS', 'CHANGE_ME_PUBLIC_PASSWORD');
+
+// Utilisateur MySQL Admin (droits complets sur gc_*)
+define('GC_DB_ADMIN_USER', 'acfe_admin');
+define('GC_DB_ADMIN_PASS', 'CHANGE_ME_ADMIN_PASSWORD');
+
+// 2. Nom obfusqué du répertoire admin (ne pas publier dans robots.txt)
+define('GC_ADMIN_DIR_NAME', 'CHANGE_ME_ADMIN_DIR');
+
+// 3. Stockage sécurisé hors web
+define('GC_SECURE_STORAGE_PATH', dirname(__DIR__) . DIRECTORY_SEPARATOR . 'secure_storage' . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR);
+
+// 4. Clés secrètes
+define('GC_CSRF_SECRET', 'CHANGE_ME_64_CHAR_HEX_OR_RANDOM');
+define('GC_SESSION_LIFETIME', 900);
+
+// 5. Restriction IP admin
+define('GC_IP_RESTRICTION_ENABLED', false);
+define('GC_ALLOWED_IPS', [
+	'127.0.0.1',
+	'::1',
+]);
+
+// 6. Anti brute-force admin
+define('GC_MAX_LOGIN_ATTEMPTS', 5);
+define('GC_LOCKOUT_TIME_SECONDS', 900);
+
+// 7. Journal d'erreurs hors web
+define('GC_ERROR_LOG_PATH', dirname(__DIR__) . DIRECTORY_SEPARATOR . 'secure_storage' . DIRECTORY_SEPARATOR . 'logs' . DIRECTORY_SEPARATOR . 'error.log');

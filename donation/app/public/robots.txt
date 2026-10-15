@@ -1,0 +1,8 @@
+# robots.txt — ACFE
+# Ne jamais y publier le chemin d'administration personnalisé.
+User-agent: *
+Disallow: /wp-admin/
+Disallow: /wp-includes/
+Disallow: /xmlrpc.php
+
+Allow: /

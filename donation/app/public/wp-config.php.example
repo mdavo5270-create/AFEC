@@ -1,0 +1,39 @@
+<?php
+/**
+ * Exemple wp-config.php — ACFE
+ *
+ * Copiez vers wp-config.php et renseignez DB + clés.
+ * Générez les salts : https://api.wordpress.org/secret-key/1.1/salt/
+ * Ne jamais committer wp-config.php.
+ */
+
+define( 'DB_NAME', 'local' );
+define( 'DB_USER', 'root' );
+define( 'DB_PASSWORD', 'CHANGE_ME' );
+define( 'DB_HOST', 'localhost' );
+define( 'DB_CHARSET', 'utf8' );
+define( 'DB_COLLATE', '' );
+
+define( 'AUTH_KEY',         'CHANGE_ME' );
+define( 'SECURE_AUTH_KEY',  'CHANGE_ME' );
+define( 'LOGGED_IN_KEY',    'CHANGE_ME' );
+define( 'NONCE_KEY',        'CHANGE_ME' );
+define( 'AUTH_SALT',        'CHANGE_ME' );
+define( 'SECURE_AUTH_SALT', 'CHANGE_ME' );
+define( 'LOGGED_IN_SALT',   'CHANGE_ME' );
+define( 'NONCE_SALT',       'CHANGE_ME' );
+define( 'WP_CACHE_KEY_SALT','CHANGE_ME' );
+
+$table_prefix = 'wp_';
+
+if ( ! defined( 'WP_DEBUG' ) ) {
+	define( 'WP_DEBUG', false );
+}
+
+define( 'WP_ENVIRONMENT_TYPE', 'local' );
+
+if ( ! defined( 'ABSPATH' ) ) {
+	define( 'ABSPATH', __DIR__ . '/' );
+}
+
+require_once ABSPATH . 'wp-settings.php';

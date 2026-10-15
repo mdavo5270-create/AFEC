@@ -1,0 +1,24 @@
+# .htaccess — Protection Avancée du Dossier Administration ACFE
+Options -Indexes
+
+# 1. Bloquer l'accès direct à tous les fichiers PHP du sous-dossier includes/
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^includes/ - [F,L]
+</IfModule>
+
+# 2. Bloquer l'accès aux fichiers sensibles
+<FilesMatch "\.(log|sql|env|ini|bak|conf)$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# 3. En-têtes HTTP de sécurité renforcés
+<IfModule mod_headers.c>
+    Header always set X-Frame-Options "DENY"
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-XSS-Protection "1; mode=block"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"
+    Header always set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; frame-ancestors 'none';"
+</IfModule>

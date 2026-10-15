@@ -1,0 +1,14 @@
+# Système et éditeurs
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Ne jamais versionner de secrets ni de données
+.env
+*.sql
+*.zip
+wp-config.php
+uploads/
+vendor/
+node_modules/
