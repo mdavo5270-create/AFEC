@@ -1,16 +1,18 @@
 <?php
 /**
  * Module d'Authentification & Brute-Force Protection — ACFE Admin
+ * Durci : rate-limit par IP + username, 2FA chiffrée, ré-auth.
  */
 
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/security.php';
+require_once __DIR__ . '/crypto.php';
+require_once __DIR__ . '/audit.php';
 
-// 1. Vérification du verrouillage temporaire anti brute-force
-function is_ip_locked(string $ip): array {
+function is_ip_locked(string $ip, ?string $username = null): array {
     $pdo = get_admin_pdo();
-    $lockout_seconds = defined('GC_LOCKOUT_TIME_SECONDS') ? GC_LOCKOUT_TIME_SECONDS : 900;
-    $max_attempts    = defined('GC_MAX_LOGIN_ATTEMPTS') ? GC_MAX_LOGIN_ATTEMPTS : 5;
+    $lockout_seconds = defined('GC_LOCKOUT_TIME_SECONDS') ? (int)GC_LOCKOUT_TIME_SECONDS : 900;
+    $max_attempts    = defined('GC_MAX_LOGIN_ATTEMPTS') ? (int)GC_MAX_LOGIN_ATTEMPTS : 5;
 
     $stmt = $pdo->prepare("
         SELECT COUNT(*) as failed_count, MAX(attempted_at) as last_attempt
@@ -19,33 +21,53 @@ function is_ip_locked(string $ip): array {
     ");
     $stmt->execute([$ip, $lockout_seconds]);
     $row = $stmt->fetch();
-
     $failed_count = (int)($row['failed_count'] ?? 0);
+
     if ($failed_count >= $max_attempts) {
-        $last_attempt_time = strtotime($row['last_attempt']);
-        $remaining = $lockout_seconds - (time() - $last_attempt_time);
+        $last = strtotime($row['last_attempt'] ?? 'now');
+        $remaining = $lockout_seconds - (time() - $last);
         if ($remaining > 0) {
-            return ['locked' => true, 'remaining' => ceil($remaining / 60)];
+            return ['locked' => true, 'remaining' => (int)ceil($remaining / 60)];
         }
     }
+
+    if ($username !== null && $username !== '') {
+        $stmt2 = $pdo->prepare("
+            SELECT COUNT(*) as failed_count, MAX(attempted_at) as last_attempt
+            FROM gc_login_attempts
+            WHERE username = ? AND success = 0 AND attempted_at > (NOW() - INTERVAL ? SECOND)
+        ");
+        $stmt2->execute([$username, $lockout_seconds]);
+        $row2 = $stmt2->fetch();
+        $failed_u = (int)($row2['failed_count'] ?? 0);
+        if ($failed_u >= $max_attempts) {
+            $last = strtotime($row2['last_attempt'] ?? 'now');
+            $remaining = $lockout_seconds - (time() - $last);
+            if ($remaining > 0) {
+                return ['locked' => true, 'remaining' => (int)ceil($remaining / 60)];
+            }
+        }
+    }
+
     return ['locked' => false, 'remaining' => 0];
 }
 
-// 2. Enregistrement d'une tentative de connexion
 function record_login_attempt(string $ip, string $username, bool $success): void {
     $pdo = get_admin_pdo();
     $stmt = $pdo->prepare("INSERT INTO gc_login_attempts (ip_address, username, attempted_at, success) VALUES (?, ?, NOW(), ?)");
     $stmt->execute([$ip, $username, $success ? 1 : 0]);
 }
 
-// 3. Authentification sécurisée de l'administrateur
 function attempt_login(string $username, string $password, ?string $code_2fa = null): array {
     $ip = get_client_ip();
-    $lock_status = is_ip_locked($ip);
+    $username = trim($username);
+
+    $lock_status = is_ip_locked($ip, $username);
     if ($lock_status['locked']) {
+        gc_audit('login_locked', ['username' => $username, 'ip' => $ip]);
         return [
             'success' => false,
-            'error'   => "Trop de tentatives infructueuses. Accès temporairement bloqué pendant encore " . $lock_status['remaining'] . " minute(s)."
+            'error'   => 'Trop de tentatives infructueuses. Accès temporairement bloqué pendant encore ' . $lock_status['remaining'] . ' minute(s).'
         ];
     }
 
@@ -56,32 +78,44 @@ function attempt_login(string $username, string $password, ?string $code_2fa = n
 
     if (!$user || !password_verify($password, $user['password_hash'])) {
         record_login_attempt($ip, $username, false);
+        gc_audit('login_failed', ['username' => $username]);
         return [
             'success' => false,
-            'error'   => "Identifiants invalides. Veuillez vérifier votre nom d'utilisateur et votre mot de passe."
+            'error'   => 'Identifiants invalides. Veuillez vérifier votre nom d\'utilisateur et votre mot de passe.'
         ];
     }
 
-    // Vérification du 2FA si activé sur le compte
-    if (!empty($user['two_factor_enabled']) && !empty($user['two_factor_secret'])) {
-        if (empty($code_2fa)) {
+    $has_2fa = !empty($user['totp_secret_enc']) || !empty($user['totp_secret']);
+    if ($has_2fa) {
+        if ($code_2fa === null || $code_2fa === '') {
             return [
                 'success' => false,
-                'require_2fa' => true,
-                'error' => "Veuillez saisir votre code d'authentification à deux facteurs (2FA)."
+                'need_2fa' => true,
+                'error'   => 'Veuillez saisir le code d\'authentification à deux facteurs.'
             ];
         }
-        if (!verify_totp_code($user['two_factor_secret'], $code_2fa)) {
+        $secret = '';
+        try {
+            if (!empty($user['totp_secret_enc'])) {
+                $secret = gc_decrypt($user['totp_secret_enc']);
+            } else {
+                $secret = (string)$user['totp_secret'];
+            }
+        } catch (Throwable $e) {
+            error_log('2FA decrypt failed for user ' . $user['id']);
+            return ['success' => false, 'error' => 'Erreur de vérification 2FA. Contactez l\'administrateur.'];
+        }
+        if (!verify_totp_code($secret, $code_2fa)) {
             record_login_attempt($ip, $username, false);
+            gc_audit('login_2fa_failed', ['username' => $username]);
             return [
                 'success' => false,
-                'require_2fa' => true,
-                'error' => "Code 2FA invalide ou expiré."
+                'need_2fa' => true,
+                'error'   => 'Code d\'authentification à deux facteurs incorrect.'
             ];
         }
     }
 
-    // Réussite de la connexion : réinitialiser l'ID de session (anti-session fixation)
     session_regenerate_id(true);
 
     $_SESSION['admin_user_id']  = (int)$user['id'];
@@ -89,27 +123,25 @@ function attempt_login(string $username, string $password, ?string $code_2fa = n
     $_SESSION['admin_email']    = (string)$user['email'];
     $_SESSION['admin_role']     = (string)$user['role'];
     $_SESSION['LAST_ACTIVITY']  = time();
+    $_SESSION['REAUTH_AT']      = time();
 
-    // Mettre à jour last_login
     $upd = $pdo->prepare("UPDATE gc_admin_users SET last_login = NOW() WHERE id = ?");
     $upd->execute([$user['id']]);
 
     record_login_attempt($ip, $username, true);
+    gc_audit('login_success', ['username' => $username]);
 
     return ['success' => true];
 }
 
-// 4. Implémentation TOTP standard RFC 6238 pour 2FA
 function verify_totp_code(string $secret, string $code): bool {
     $code = trim($code);
     if (strlen($code) !== 6 || !ctype_digit($code)) {
         return false;
     }
-    $time_slice = floor(time() / 30);
-    // Vérifier la fenêtre actuelle, -1 et +1 pour tolérer un léger décalage d'horloge
+    $time_slice = (int)floor(time() / 30);
     for ($i = -1; $i <= 1; $i++) {
-        $calculated = get_totp_code($secret, $time_slice + $i);
-        if (hash_equals($calculated, $code)) {
+        if (hash_equals(get_totp_code($secret, $time_slice + $i), $code)) {
             return true;
         }
     }
@@ -140,4 +172,13 @@ function base32_decode(string $b32): string {
         $binary .= chr(bindec(substr($bits, $i, 8)));
     }
     return $binary;
+}
+
+function generate_totp_secret(int $length = 16): string {
+    $alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    $secret = '';
+    for ($i = 0; $i < $length; $i++) {
+        $secret .= $alphabet[random_int(0, 31)];
+    }
+    return $secret;
 }
