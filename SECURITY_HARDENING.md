@@ -1,46 +1,31 @@
-# Durcissement sécurité ACFE — terminé
+# Durcissement sécurité ACFE — patch complet appliqué
 
-Session de sécurisation appliquée sur `main` (15/10/2026).
+Correctifs du fichier `afec-correctifs-securite.patch` intégrés sur `main`.
 
-## Admin custom (`donation/.../acfe-z5xyst3ouh/`)
+## Admin (`acfe-z5xyst3ouh/`)
 
-| Fichier | Rôle |
-|---------|------|
-| `includes/security.php` | IP fiable, HTTPS canonique, HSTS, CSP, `require_recent_auth()` |
-| `includes/crypto.php` | Chiffrement sodium/OpenSSL des secrets 2FA |
-| `includes/audit.php` | Journal d'audit des actions sensibles |
-| `includes/auth.php` | Rate-limit IP + username, 2FA chiffrée, audit login |
-| `includes/csrf.php` | CSRF POST uniquement |
-| `settings.php` | Ré-auth, 2FA serveur + chiffrée |
-| `export.php` | Anti injection formules CSV, audit, CSRF POST |
-| `download.php` | Téléchargements sécurisés + audit |
+| Module | Statut |
+|--------|--------|
+| `includes/security.php` | IP fiable, HTTPS, HSTS, CSP, COOP/CORP, sessions idle+absolues, `session_epoch`, 2FA obligatoire |
+| `includes/auth.php` | `is_login_locked` IP+user, hash factice, 2FA chiffrée, `gc_reauthenticate_current_admin` |
+| `includes/crypto.php` | sodium secretbox, jetons download signés 10 min |
+| `includes/audit.php` | journal actions sensibles |
+| `includes/csrf.php` | POST uniquement |
+| `includes/db.php` | SSL optionnel, erreurs propres |
+| `download.php` | token+exp+admin, MIME strict, audit obligatoire |
+| `export.php` | POST+CSRF+ré-auth+CSV safe+audit |
+| `.htaccess` | Apache 2.4, headers alignés |
 
-## Plugin public (`gestion-candidatures/`)
+## Plugin public
 
-| Fichier | Rôle |
-|---------|------|
-| `includes/form.php` | Helpers `gc_client_ip`, `gc_rate_limited`, `gc_clip` |
-| `includes/form-core.php` | Shortcodes, assets, routeur |
-| `includes/form-handlers.php` | Suivi POST, upload privé, download |
-| `includes/form-submit.php` | Soumission : clip, anti-doublons atomiques (`gc_phones`), insert |
-| `includes/form-pages2.php` / `form-pages2b.php` / `form-pages3.php` | Pages publiques |
+Déjà en place sur `main` (structure découpée) :
+- suivi POST + rate-limit + anti-énumération
+- anti-doublons `gc_phones` + transaction
+- `gc_clip`, `gc_rate_limited`, `gc_client_ip`
 
-## Migration SQL
+## Production (hors dépôt)
 
-Exécuter une fois en production : `sql/security_hardening.sql`
-
-- table `gc_audit_log`
-- colonne `totp_secret_enc`
-- table `gc_phones` (anti-doublons atomiques)
-
-## Checklist prod (hors code)
-
-1. Configurer `secure_config/app_config.php` (`GC_CANONICAL_HOST`, `GC_TRUSTED_PROXIES`, secrets)
-2. Activer 2FA admin + restriction IP si possible
-3. SPF / DKIM / DMARC
-4. Supprimer thèmes/plugins inutiles, `readme.html`, Sample Page
-5. Si d’anciens secrets ont été dans l’historique Git : purge (BFG / filter-repo) + rotation
-
-## .gitignore
-
-Exclut notamment : `wp-config.php`, `secure_config/`, `local-xdebuginfo.php`, `.env*`, uploads privés.
+1. Exécuter `sql/security_hardening.sql`
+2. Configurer `secure_config/app_config.php` (`GC_CANONICAL_HOST`, `GC_TRUSTED_PROXIES`, secrets, optionnel `GC_DATA_KEY`)
+3. Activer 2FA admin
+4. SPF / DKIM / DMARC
