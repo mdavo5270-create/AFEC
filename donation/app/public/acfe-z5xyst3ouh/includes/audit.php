@@ -1,25 +1,63 @@
 <?php
 /**
- * Journal d'audit — actions sensibles de l'administration.
+ * Journal d'audit — Espace Administration ACFE
+ *
+ * Trace qui a exporté ou consulté quoi, quand et depuis quelle adresse IP.
+ * Les actions sensibles (export CSV, téléchargement de pièces) échouent si le journal est inaccessible.
  */
 
-require_once __DIR__ . '/db.php';
-require_once __DIR__ . '/security.php';
+if (basename($_SERVER['SCRIPT_FILENAME'] ?? '') === basename(__FILE__)) {
+    http_response_code(403);
+    exit;
+}
 
-function gc_audit(string $action, array $details = []): void {
+require_once __DIR__ . '/db.php';
+
+function gc_audit_ensure_table(PDO $pdo): void {
+    static $done = false;
+    if ($done) {
+        return;
+    }
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS gc_audit_log (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            admin_username VARCHAR(100) NOT NULL,
+            action VARCHAR(60) NOT NULL,
+            target VARCHAR(190) NOT NULL DEFAULT '',
+            meta TEXT NULL,
+            ip_address VARCHAR(45) NOT NULL DEFAULT '',
+            created_at DATETIME NOT NULL,
+            PRIMARY KEY (id),
+            KEY idx_audit_action (action),
+            KEY idx_audit_created (created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    ");
+    $done = true;
+}
+
+/**
+ * Enregistre une action. Retourne false si l'écriture a échoué (l'appelant décide de bloquer ou non).
+ *
+ * @param array<string,mixed> $meta
+ */
+function gc_audit(string $action, string $target = '', array $meta = []): bool {
     try {
         $pdo = get_admin_pdo();
-        $stmt = $pdo->prepare("
-            INSERT INTO gc_audit_log (user_id, username, action, details, ip_address, user_agent, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, NOW())
-        ");
-        $user_id  = $_SESSION['admin_user_id'] ?? null;
-        $username = $_SESSION['admin_username'] ?? null;
-        $ip       = get_client_ip();
-        $ua       = substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 255);
-        $json     = $details ? json_encode($details, JSON_UNESCAPED_UNICODE) : null;
-        $stmt->execute([$user_id, $username, $action, $json, $ip, $ua]);
+        gc_audit_ensure_table($pdo);
+        $stmt = $pdo->prepare(
+            "INSERT INTO gc_audit_log (admin_username, action, target, meta, ip_address, created_at)
+             VALUES (?, ?, ?, ?, ?, NOW())"
+        );
+        $stmt->execute([
+            (string)($_SESSION['admin_username'] ?? 'inconnu'),
+            $action,
+            $target,
+            $meta ? json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : null,
+            function_exists('get_client_ip') ? get_client_ip() : '',
+        ]);
+        return true;
     } catch (Throwable $e) {
-        error_log('gc_audit failed: ' . $e->getMessage());
+        error_log('Audit log indisponible : ' . $e->getMessage());
+        return false;
     }
 }
