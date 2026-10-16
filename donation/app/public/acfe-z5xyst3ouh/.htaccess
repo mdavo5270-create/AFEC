@@ -1,24 +1,34 @@
-# .htaccess — Protection Avancée du Dossier Administration ACFE
+# .htaccess — Protection du dossier Administration ACFE (Apache)
+# ATTENTION : nginx ignore totalement ce fichier. Sous nginx, reprendre les règles équivalentes
+# décrites dans SECURITY.md (section « Serveur web »).
 Options -Indexes
 
-# 1. Bloquer l'accès direct à tous les fichiers PHP du sous-dossier includes/
+# 1. Bloquer l'accès direct au sous-dossier includes/ (bibliothèques internes)
 <IfModule mod_rewrite.c>
     RewriteEngine On
     RewriteRule ^includes/ - [F,L]
 </IfModule>
 
-# 2. Bloquer l'accès aux fichiers sensibles
-<FilesMatch "\.(log|sql|env|ini|bak|conf)$">
-    Order allow,deny
-    Deny from all
+# 2. Bloquer l'accès aux fichiers sensibles (syntaxe Apache 2.4, avec repli 2.2)
+<FilesMatch "\.(log|sql|env|ini|bak|conf|example|md)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
 </FilesMatch>
 
-# 3. En-têtes HTTP de sécurité renforcés
+# 3. En-têtes HTTP de sécurité (identiques à ceux envoyés par includes/security.php)
 <IfModule mod_headers.c>
     Header always set X-Frame-Options "DENY"
     Header always set X-Content-Type-Options "nosniff"
-    Header always set X-XSS-Protection "1; mode=block"
-    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set X-XSS-Protection "0"
+    Header always set Referrer-Policy "no-referrer"
+    Header always set Permissions-Policy "geolocation=(), camera=(), microphone=(), payment=(), usb=()"
+    Header always set Cross-Origin-Opener-Policy "same-origin"
+    Header always set Cross-Origin-Resource-Policy "same-origin"
     Header always set X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"
-    Header always set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; frame-ancestors 'none';"
+    Header always set Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; frame-ancestors 'none'; form-action 'self'; base-uri 'self'; object-src 'none';"
 </IfModule>
