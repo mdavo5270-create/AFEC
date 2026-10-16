@@ -36,8 +36,6 @@ function gc_audit_ensure_table(PDO $pdo): void {
 }
 
 /**
- * Enregistre une action. Retourne false si l'écriture a échoué (l'appelant décide de bloquer ou non).
- *
  * @param array<string,mixed> $meta
  */
 function gc_audit(string $action, string $target = '', array $meta = []): bool {

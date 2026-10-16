@@ -1,54 +1,79 @@
 <?php
 /**
- * Chiffrement des secrets sensibles (2FA, etc.)
- * Utilise sodium (libsodium) si disponible, sinon OpenSSL AES-256-GCM.
+ * Utilitaires cryptographiques — Espace Administration ACFE
+ *
+ * - Dérivation de clés par usage (aucun secret brut réutilisé entre fonctions).
+ * - Chiffrement des secrets 2FA au repos (libsodium, inclus dans PHP >= 7.2).
+ * - Jetons de téléchargement signés, liés à l'administrateur et à durée limitée.
  */
 
-function gc_crypto_key(): string {
-    $secret = defined('GC_CSRF_SECRET') ? GC_CSRF_SECRET : '';
-    if (strlen($secret) < 32) {
-        $secret = hash('sha256', __DIR__ . php_uname(), true);
-    }
-    return hash('sha256', $secret . '|acfe-crypto-v1', true);
+if (basename($_SERVER['SCRIPT_FILENAME'] ?? '') === basename(__FILE__)) {
+    http_response_code(403);
+    exit;
 }
 
-function gc_encrypt(string $plaintext): string {
-    $key = gc_crypto_key();
-    if (function_exists('sodium_crypto_secretbox')) {
-        $nonce = random_bytes(SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
-        $cipher = sodium_crypto_secretbox($plaintext, $nonce, $key);
-        return base64_encode($nonce . $cipher);
+function gc_master_secret(): string {
+    if (defined('GC_DATA_KEY') && is_string(GC_DATA_KEY) && GC_DATA_KEY !== '') {
+        return GC_DATA_KEY;
     }
-    $iv = random_bytes(12);
-    $tag = '';
-    $cipher = openssl_encrypt($plaintext, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag, '', 16);
-    if ($cipher === false) {
-        throw new RuntimeException('Échec du chiffrement');
-    }
-    return base64_encode($iv . $tag . $cipher);
+    return (string)GC_CSRF_SECRET;
 }
 
-function gc_decrypt(string $encoded): string {
-    $raw = base64_decode($encoded, true);
-    if ($raw === false || strlen($raw) < 28) {
-        throw new RuntimeException('Données chiffrées invalides');
+function gc_derive_key(string $purpose): string {
+    return hash_hmac('sha256', 'acfe|' . $purpose, gc_master_secret(), true);
+}
+
+function gc_is_encrypted_secret(string $stored): bool {
+    return strncmp($stored, 'enc1:', 5) === 0;
+}
+
+function gc_encrypt_secret(string $plain): string {
+    if (!function_exists('sodium_crypto_secretbox')) {
+        throw new RuntimeException('Extension sodium indisponible : chiffrement impossible.');
     }
-    $key = gc_crypto_key();
-    if (function_exists('sodium_crypto_secretbox_open')) {
-        $nonce = substr($raw, 0, SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
-        $cipher = substr($raw, SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
-        $plain = sodium_crypto_secretbox_open($cipher, $nonce, $key);
-        if ($plain === false) {
-            throw new RuntimeException('Échec du déchiffrement');
-        }
-        return $plain;
+    $nonce  = random_bytes(SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
+    $cipher = sodium_crypto_secretbox($plain, $nonce, gc_derive_key('2fa-secret-v1'));
+    return 'enc1:' . base64_encode($nonce . $cipher);
+}
+
+function gc_decrypt_secret(string $stored): ?string {
+    if (!gc_is_encrypted_secret($stored)) {
+        return $stored;
     }
-    $iv = substr($raw, 0, 12);
-    $tag = substr($raw, 12, 16);
-    $cipher = substr($raw, 28);
-    $plain = openssl_decrypt($cipher, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag);
-    if ($plain === false) {
-        throw new RuntimeException('Échec du déchiffrement');
+    if (!function_exists('sodium_crypto_secretbox_open')) {
+        return null;
     }
-    return $plain;
+    $raw = base64_decode(substr($stored, 5), true);
+    $min = SODIUM_CRYPTO_SECRETBOX_NONCEBYTES + SODIUM_CRYPTO_SECRETBOX_MACBYTES;
+    if ($raw === false || strlen($raw) < $min) {
+        return null;
+    }
+    $nonce  = substr($raw, 0, SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
+    $cipher = substr($raw, SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
+    $plain  = sodium_crypto_secretbox_open($cipher, $nonce, gc_derive_key('2fa-secret-v1'));
+    return $plain === false ? null : $plain;
+}
+
+function gc_download_token(int $cand_id, string $type, int $expires, int $admin_id): string {
+    return hash_hmac('sha256', "dl|{$cand_id}|{$type}|{$expires}|{$admin_id}", gc_derive_key('download-v1'));
+}
+
+function gc_download_url(int $cand_id, string $type): string {
+    $admin_id = (int)($_SESSION['admin_user_id'] ?? 0);
+    $expires  = time() + 600;
+    $token    = gc_download_token($cand_id, $type, $expires, $admin_id);
+    return 'download.php?' . http_build_query([
+        'id'    => $cand_id,
+        'type'  => $type,
+        'exp'   => $expires,
+        'token' => $token,
+    ]);
+}
+
+function gc_verify_download_token(int $cand_id, string $type, int $expires, string $token): bool {
+    if ($expires < time() || $expires > time() + 3600) {
+        return false;
+    }
+    $admin_id = (int)($_SESSION['admin_user_id'] ?? 0);
+    return hash_equals(gc_download_token($cand_id, $type, $expires, $admin_id), $token);
 }
