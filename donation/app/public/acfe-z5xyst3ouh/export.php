@@ -1,72 +1,79 @@
 <?php
 /**
- * Export CSV des candidatures — sécurisé contre l'injection de formules
- * et journalisé.
+ * Export CSV Sécurisé — ACFE Admin
+ *
+ * - Requête POST uniquement, avec jeton CSRF.
+ * - Ré-authentification par mot de passe.
+ * - Neutralisation des formules (injection CSV).
+ * - Journal d'audit obligatoire.
  */
-require_once __DIR__ . '/includes/security.php';
+
 require_once __DIR__ . '/includes/db.php';
+require_once __DIR__ . '/includes/security.php';
 require_once __DIR__ . '/includes/csrf.php';
+require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/audit.php';
 
 check_admin_auth();
+gc_require_post();
 require_csrf();
 
-$status = isset($_POST['status']) ? trim((string)$_POST['status']) : '';
-$allowed_statuses = ['', 'recue', 'en_verification', 'en_analyse', 'liste_courte', 'retenue', 'contactee', 'injoignable', 'confirmee', 'payee', 'refusee'];
-if (!in_array($status, $allowed_statuses, true)) {
-    $status = '';
+$reauth = gc_reauthenticate_current_admin((string)($_POST['current_password'] ?? ''));
+if (!$reauth['ok']) {
+    http_response_code(403);
+    die("Export refusé : " . e($reauth['error']) . " Revenez en arrière et réessayez.");
+}
+
+function gc_csv_safe($value): string {
+    $text = (string)$value;
+    if ($text !== '' && preg_match('/^[=+\-@\t\r]/', ltrim($text, " \t")) === 1) {
+        return "'" . $text;
+    }
+    return $text;
 }
 
 $pdo = get_admin_pdo();
-
-$sql = "SELECT id, dossier_num, firstname, lastname, email, phone, city, country, status, created_at
-        FROM gc_candidatures";
-$params = [];
-if ($status !== '') {
-    $sql .= " WHERE status = ?";
-    $params[] = $status;
-}
-$sql .= " ORDER BY created_at DESC LIMIT 10000";
-
-$stmt = $pdo->prepare($sql);
-$stmt->execute($params);
+$stmt = $pdo->query("SELECT id, dossier_num, firstname, lastname, email, phone, country, city, situation_pro, foyer, urgency, status, has_missing_doc, created_at FROM gc_candidatures ORDER BY id DESC");
 $rows = $stmt->fetchAll();
 
-function csv_safe(string $value): string {
-    $value = str_replace(["\r", "\n", "\t"], ' ', $value);
-    if ($value !== '' && preg_match('/^[=+\-@\t\r]/', $value)) {
-        return "'" . $value;
-    }
-    return $value;
+if (!gc_audit('export_csv', 'gc_candidatures', ['rows' => count($rows)])) {
+    http_response_code(503);
+    die("Export impossible : le journal d'audit est indisponible. Contactez l'administrateur système.");
 }
 
-gc_audit('export_csv', [
-    'status_filter' => $status ?: 'all',
-    'row_count'     => count($rows),
-]);
+$filename = 'candidatures_acfe_' . date('Y-m-d_His') . '.csv';
 
 header('Content-Type: text/csv; charset=UTF-8');
-header('Content-Disposition: attachment; filename="candidatures_' . date('Y-m-d_His') . '.csv"');
+header('Content-Disposition: attachment; filename="' . $filename . '"');
+header('X-Content-Type-Options: nosniff');
 header('Cache-Control: private, no-store, no-cache, must-revalidate');
-header('Pragma: no-cache');
 
-$out = fopen('php://output', 'w');
-fwrite($out, "\xEF\xBB\xBF");
-fputcsv($out, ['ID', 'N° Dossier', 'Prénom', 'Nom', 'Email', 'Téléphone', 'Ville', 'Pays', 'Statut', 'Date création'], ';');
+$output = fopen('php://output', 'w');
+fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
+
+fputcsv($output, [
+    'ID', 'Numéro Dossier', 'Prénom', 'Nom', 'E-mail', 'Téléphone', 'Pays', 'Ville',
+    'Situation Pro', 'Foyer', 'Degré Urgence', 'Statut', 'Doc Manquant', 'Date Dépôt'
+], ';', '"', '\\');
 
 foreach ($rows as $r) {
-    fputcsv($out, [
-        $r['id'],
-        csv_safe((string)$r['dossier_num']),
-        csv_safe((string)$r['firstname']),
-        csv_safe((string)$r['lastname']),
-        csv_safe((string)$r['email']),
-        csv_safe((string)$r['phone']),
-        csv_safe((string)$r['city']),
-        csv_safe((string)$r['country']),
-        csv_safe((string)$r['status']),
-        $r['created_at'],
-    ], ';');
+    fputcsv($output, [
+        (int)$r['id'],
+        gc_csv_safe($r['dossier_num']),
+        gc_csv_safe($r['firstname']),
+        gc_csv_safe($r['lastname']),
+        gc_csv_safe($r['email']),
+        gc_csv_safe($r['phone']),
+        gc_csv_safe($r['country']),
+        gc_csv_safe($r['city']),
+        gc_csv_safe($r['situation_pro']),
+        gc_csv_safe($r['foyer']),
+        gc_csv_safe($r['urgency']),
+        gc_csv_safe($r['status']),
+        $r['has_missing_doc'] ? 'Oui' : 'Non',
+        gc_csv_safe($r['created_at']),
+    ], ';', '"', '\\');
 }
-fclose($out);
+
+fclose($output);
 exit;
