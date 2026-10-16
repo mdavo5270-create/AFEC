@@ -1,4 +1,4 @@
-name: PHP Composer
+name: PHP Lint
 
 on:
   push:
@@ -10,30 +10,29 @@ permissions:
   contents: read
 
 jobs:
-  build:
-
+  lint:
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Validate composer.json and composer.lock
-      run: composer validate --strict
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          coverage: none
 
-    - name: Cache Composer packages
-      id: composer-cache
-      uses: actions/cache@v3
-      with:
-        path: vendor
-        key: ${{ runner.os }}-php-${{ hashFiles('**/composer.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-php-
-
-    - name: Install dependencies
-      run: composer install --prefer-dist --no-progress
-
-    # Add a test script to composer.json, for instance: "test": "vendor/bin/phpunit"
-    # Docs: https://getcomposer.org/doc/articles/scripts.md
-
-    # - name: Run test suite
-    #   run: composer run-script test
+      - name: Lint PHP files (syntax)
+        run: |
+          set -e
+          fail=0
+          while IFS= read -r -d '' f; do
+            if ! php -l "$f" > /dev/null; then
+              echo "FAIL: $f"
+              fail=1
+            fi
+          done < <(find donation/app/public/acfe-z5xyst3ouh gestion-candidatures -type f -name "*.php" -print0)
+          if [ "$fail" -ne 0 ]; then
+            echo "PHP syntax errors found"
+            exit 1
+          fi
+          echo "All PHP files OK"
